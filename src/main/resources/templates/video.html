@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>AKBANG</title>
+    <style>
+        :root { --bg:#0b0e12; --card:#10141b; --muted:#94a3b8; --text:#e5e7eb; --line:#1f2937; --accent:#a855f7; --accent-2:#ec4899; --btn:#2563eb; }
+        *{box-sizing:border-box}
+        body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+        header{display:flex;align-items:center;gap:8px;padding:16px 20px}
+        header .back{font-size:22px;line-height:1;opacity:.8;text-decoration:none;color:var(--text)}
+        header .logo{margin:0 auto;font-weight:900;letter-spacing:.8px;background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+        .wrap{padding:10px 16px 24px}
+        .search{margin:10px 0 18px}
+        .search input{width:100%;border:1px solid var(--line);background:#0f131a;color:#cbd5e1;border-radius:14px;padding:12px 14px;outline:none}
+        /* 카드 */
+        .card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:18px 16px;box-shadow:0 10px 24px rgba(0,0,0,.25)}
+        .title{font-weight:800;font-size:20px;letter-spacing:.2px}
+        .subtitle{font-size:12px;color:var(--muted);margin-top:2px}
+        .label{font-size:12px;color:var(--muted);margin:14px 0 8px}
+        .progress{position:relative;height:8px;background:#0f1621;border-radius:999px;overflow:hidden;cursor:pointer}
+        .progress .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+        .times{display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:#cbd5e1}
+        .controls{display:flex;gap:12px;align-items:center;justify-content:center;margin:14px 0 4px}
+        button{appearance:none;border:0;cursor:pointer;border-radius:14px;padding:10px 14px;font-weight:700}
+        .btn{background:var(--btn);color:#fff}
+        .btn.grey{background:#334155;color:#e2e8f0}
+        .btn.circle{border-radius:999px;padding:12px 14px;min-width:46px}
+        .hint{font-size:11px;color:#94a3b8;text-align:center;opacity:.9}
+        /* 유튜브 화면 숨김 */
+        #hidden-player{position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none}
+    </style>
+</head>
+<body>
+<header>
+    <a href="javascript:history.back()" class="back">‹</a>
+    <h1 class="logo">AKBANG</h1>
+</header>
+
+<div class="wrap">
+    <!-- (옵션) 검색 폼 – 컨트롤러의 파라미터 이름에 맞춰 바꿔 쓰세요 -->
+    <form class="search" method="get" action="/api/youtube">
+        <input name="keyword" placeholder="스근한 곡 검색 #태그" />
+    </form>
+
+    <!-- 메인 카드 -->
+    <div class="card">
+        <div class="title" id="title">-</div>
+        <div class="subtitle" id="subtitle">Now Playing</div>
+
+        <div class="label">나만의 특별한 하이라이트</div>
+        <div class="progress" id="progress">
+            <div class="fill" id="progressFill"></div>
+        </div>
+        <div class="times">
+            <span id="cur">0:00</span>
+            <span id="dur">0:00</span>
+        </div>
+
+        <div class="controls">
+            <button id="prev" class="btn grey" type="button">이전곡</button>
+            <button id="toggle" class="btn circle" type="button">▶︎</button>
+            <button id="next" class="btn" type="button">다음곡</button>
+            <button id="mute" class="btn grey" type="button">🔇</button>
+        </div>
+
+        <div class="hint">유튜브 화면은 숨기고 오디오만 재생됩니다. 자동재생은 브라우저 정책상 음소거 상태에서 시작돼요.</div>
+    </div>
+</div>
+
+<!-- 숨김 플레이어 컨테이너 -->
+<div id="hidden-player"><div id="yt-player"></div></div>
+
+<!-- YouTube IFrame Player API -->
+<script src="https://www.youtube.com/iframe_api"></script>
+
+<!-- 서버에서 넘어온 videos를 안전하게 읽기: data-*에 담아두고 JS에서 수집 -->
+<div id="playlist" style="display:none">
+    <div class="item"
+         th:each="v : ${videos}"
+         th:data-url="${v.url}"
+         th:data-title="${v.title}"
+         th:data-duration="${v.duration}">
+    </div>
+</div>
+
+<script th:inline="javascript">
+    // --- 데이터 수집 ---
+    const items = Array.from(document.querySelectorAll('#playlist .item')).map(el => ({
+        url: el.dataset.url,                 // https://www.youtube-nocookie.com/embed/{id}
+        title: el.dataset.title || '',
+        isoDur: el.dataset.duration || ''    // ISO8601 (예: PT2M52S)
+    }));
+
+    function idFromEmbed(u) {
+        const m = (u||'').match(/\/embed\/([A-Za-z0-9_-]{11})/);
+        return m ? m[1] : null;
+    }
+    function parseISO8601(iso){
+        // PT#H#M#S → seconds
+        const m = (iso||'').match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        if(!m) return 0;
+        return (m[1]?+m[1]:0)*3600 + (m[2]?+m[2]:0)*60 + (m[3]?+m[3]:0);
+    }
+    function fmt(sec){
+        sec = Math.max(0, Math.floor(sec||0));
+        const h = Math.floor(sec/3600);
+        const m = Math.floor((sec%3600)/60);
+        const s = sec%60;
+        return h>0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+            : `${m}:${String(s).padStart(2,'0')}`;
+    }
+
+    const tracks = items.map(it => ({
+        id: idFromEmbed(it.url),
+        title: it.title,
+        durSec: parseISO8601(it.isoDur)
+    })).filter(t => !!t.id);
+
+    // --- UI 엘리먼트 ---
+    const elTitle = document.getElementById('title');
+    const elSub   = document.getElementById('subtitle');
+    const elCur   = document.getElementById('cur');
+    const elDur   = document.getElementById('dur');
+    const bar     = document.getElementById('progress');
+    const fill    = document.getElementById('progressFill');
+    const btnPrev = document.getElementById('prev');
+    const btnNext = document.getElementById('next');
+    const btnTog  = document.getElementById('toggle');
+    const btnMute = document.getElementById('mute');
+
+    let idx = 0;
+    let player;
+    let tick;
+
+    function updateMeta() {
+        if (!tracks.length) return;
+        const t = tracks[idx];
+        elTitle.textContent = t.title || '(제목 없음)';
+        // duration: YouTube가 로드되면 실제 길이로 보정
+        const d = player?.getDuration?.() || t.durSec || 0;
+        elDur.textContent = fmt(d);
+        elSub.textContent = `Track ${idx+1} / ${tracks.length}`;
+    }
+
+    function setPlayIcon(state){
+        // PLAYING: ⏸, else ▶︎
+        btnTog.textContent = (state === YT.PlayerState.PLAYING) ? '⏸' : '▶︎';
+    }
+
+    function load(i){
+        if (!tracks.length || !player) return;
+        idx = (i + tracks.length) % tracks.length;
+        player.loadVideoById(tracks[idx].id);
+        player.playVideo();
+        setPlayIcon(YT.PlayerState.PLAYING);
+        updateMeta();
+    }
+
+    function startTick(){
+        stopTick();
+        tick = setInterval(() => {
+            if (!player) return;
+            const cur = player.getCurrentTime?.() || 0;
+            const dur = player.getDuration?.() || (tracks[idx]?.durSec || 0) || 1;
+            elCur.textContent = fmt(cur);
+            elDur.textContent = fmt(dur);
+            const pct = Math.min(100, (cur/dur)*100);
+            fill.style.width = pct + '%';
+        }, 250);
+    }
+    function stopTick(){ if (tick) { clearInterval(tick); tick = null; } }
+
+    // 진행바 클릭 탐색
+    bar.addEventListener('click', (e)=>{
+        if (!player) return;
+        const rect = bar.getBoundingClientRect();
+        const ratio = (e.clientX - rect.left) / rect.width;
+        const dur = player.getDuration?.() || (tracks[idx]?.durSec || 0);
+        player.seekTo(Math.max(0, ratio * dur), true);
+    });
+
+    // 버튼
+    btnPrev.addEventListener('click', ()=> load(idx - 1));
+    btnNext.addEventListener('click', ()=> load(idx + 1));
+    btnTog.addEventListener('click', ()=>{
+        if (!player) return;
+        const st = player.getPlayerState();
+        if (st === YT.PlayerState.PLAYING) { player.pauseVideo(); setPlayIcon(YT.PlayerState.PAUSED); }
+        else { player.playVideo(); setPlayIcon(YT.PlayerState.PLAYING); }
+    });
+    btnMute.addEventListener('click', ()=>{
+        if (!player) return;
+        if (player.isMuted()) { player.unMute(); btnMute.textContent='🔊'; }
+        else { player.mute(); btnMute.textContent='🔇'; }
+    });
+
+    // YouTube API 준비 → 플레이어 생성 (자동재생은 mute로 시작)
+    window.onYouTubeIframeAPIReady = function(){
+        if (!tracks.length) { elTitle.textContent = '검색 결과가 없습니다'; return; }
+        player = new YT.Player('yt-player', {
+            height: '1', width: '1',
+            videoId: tracks[0].id,
+            playerVars: { autoplay: 1, mute: 1, controls: 0, rel: 0, modestbranding: 1, playsinline: 1 },
+            events: {
+                onReady: () => { updateMeta(); setPlayIcon(YT.PlayerState.PLAYING); startTick(); },
+                onStateChange: (ev) => {
+                    if (ev.data === YT.PlayerState.ENDED) load(idx + 1);
+                    if (ev.data === YT.PlayerState.PLAYING) { setPlayIcon(YT.PlayerState.PLAYING); startTick(); }
+                    if (ev.data === YT.PlayerState.PAUSED)  { setPlayIcon(YT.PlayerState.PAUSED);  stopTick(); }
+                }
+            }
+        });
+    };
+</script>
+</body>
+</html>
