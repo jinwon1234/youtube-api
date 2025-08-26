@@ -53,10 +53,6 @@ public class YoutubeService {
                     .setKey(apiKey)
                     .execute();
 
-            Video first = videoResponse.getItems().getFirst();
-
-
-
             return videoResponse.getItems()
                     .stream().map(YoutubeVideoResponse::new).toList();
 
